@@ -47,6 +47,7 @@
 	    <option value="coordination_ring">Coordination Ring (random1)</option>
 	    <option value="forced_coordination">Forced Coordination (random0)</option>
 	    <option value="counter_circuit">Counter Circuit (random3)</option>
+      <option value="symmetric_coordination">Symmetric Coordination (symmetric_coordination)</option>
 	  </select>
 	</div>
   <div class="form-group col-lg-2">
@@ -66,10 +67,30 @@
     <label for="layout">Deterministic?</label>
     <input type="checkbox" id="deterministic" name="deterministic">
   </div> -->
-  <!-- <div class="form-group col-lg-2">
+  <div class="form-group col-lg-2">
     <label for="layout">Automatically Save Game Trajectories?</label>
     <input type="checkbox" id="saveTrajectories" name="saveTrajectories">
-  </div> -->
+  </div>
+  <div class="form-group col-lg-2"></div>
+    <label for="fileName">File Name</label>
+    <input type="text" class="form-control" id="fileName" placeholder="Enter filename save as">
+  </div>
+  <div class="form-group col-lg-3">
+    <label for="strategyPlayerZero" style="color:#1E6A9E">Player 1 Strategy</label>
+    <select class="form-control" id="strategyPlayerZero">
+      <option value="onion_only">Onion Only</option>
+      <option value="plate_only">Plate Only</option>
+      <option value="plate_and_onion">Plate and Onion</option>
+    </select>
+  </div>
+  <div class="form-group col-lg-3">
+    <label for="strategyPlayerOne" style="color:#44956B">Player 2 Strategy</label>
+    <select class="form-control" id="strategyPlayerOne">
+      <option value="onion_only">Onion Only</option>
+      <option value="plate_only">Plates Only</option>
+      <option value="plate_and_onion">Plate and Onion</option>
+    </select>
+  </div>
   
       </div>
       </div>

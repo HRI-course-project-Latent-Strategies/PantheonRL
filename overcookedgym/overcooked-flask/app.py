@@ -130,22 +130,24 @@ def predict():
 def updatemodel():
     if request.method == 'POST':
         data_json = json.loads(request.data)
-        traj_dict, traj_id, server_layout_name, algo = data_json["traj"], data_json[
-            "traj_id"], data_json["layout_name"], data_json["algo"]
+        traj_dict, traj_id, server_layout_name, algo, p0_strat, p1_strat, file_name = data_json["traj"], data_json[
+            "traj_id"], data_json["layout_name"], data_json["algo"], data_json['p0_strat'], data_json['p1_strat'], data_json['file_name']
         layout_name = NAME_TRANSLATION[server_layout_name]
         print(traj_id)
 
         if ARGS.trajs_savepath:
+            import time
             # Save trajectory (save this to keep reward information)
-            filename = "%s.json" % (ARGS.trajs_savepath)
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
-            with open(filename, 'w') as f:
-                json.dump(traj_dict, f)
+            datetime = time.strftime("%Y-%m-%d-%H-%M-%S-")
+            filename = (ARGS.trajs_savepath + '/' + file_name + '_' + datetime) 
+            os.makedirs(os.path.dirname("%s.json" % filename), exist_ok=True)
+            with open("%s.json" % filename, 'w') as f:
+                json.dump(data_json, f)
 
             # Save transitions minimal (only state/action/done, no reward)
             simultaneous_transitions = convert_traj_to_simultaneous_transitions(
                 traj_dict, layout_name)
-            simultaneous_transitions.write_transition(ARGS.trajs_savepath)
+            simultaneous_transitions.write_transition(filename)
 
         # Finetune model: todo
 
@@ -183,7 +185,7 @@ if __name__ == '__main__':
         ALT_TRANSITIONS = simultaneous_transitions.get_alt_transitions()
     else:
         # at least one policy should be specified, the other can be human
-        assert(ARGS.modelpath_p0 or ARGS.modelpath_p1)
+        # assert(ARGS.modelpath_p0 or ARGS.modelpath_p1)
         if ARGS.modelpath_p0:
             POLICY_P0 = PPO.load(ARGS.modelpath_p0)
         if ARGS.modelpath_p1:

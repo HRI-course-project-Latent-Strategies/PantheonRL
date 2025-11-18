@@ -66,6 +66,17 @@ let layouts = {
         "O1    XXXXX  2S",
         "XXXXX  X    XPX",
         "XXXXXXXXXXXXXXX"
+    ],
+    "symmetric_coordination": [
+        "XXXXXXXXX",
+        "X       X",
+        "X       X", 
+        "X   X   X",
+        "X 1 X 2 X",
+        "X   X   X",
+        "O   X   D",
+        "O   X   D",
+        "XSXSXPXPX"
     ]
 };
 
