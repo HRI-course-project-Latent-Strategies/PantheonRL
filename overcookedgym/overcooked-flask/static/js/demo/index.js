@@ -99,15 +99,37 @@ function startGame(endOfGameCallback) {
         endOfGameCallback();
         return;
     }
-    let player_index = null; 
-    let npc_policies = [0, 1]; 
+    // let player_index = null; 
+    // let npc_policies = [0, 1]; 
+    // if (players[0] == 'human') {
+    //     player_index = 0;
+    //     npc_policies = [1];
+    // }
+    // if (players[1] == 'human') {
+    //     player_index = 1;
+    //     npc_policies = [0]; 
+    // }
+
+    var player_index = [];
+    var npc_policies = [];
+    var mppi_policies = [];
+
+    // Check player 0
     if (players[0] == 'human') {
-        player_index = 0;
-        npc_policies = [1];
+      player_index.push(0);
+    } else if (players[0] == 'npc') {
+      npc_policies.push(0);
+    } else if (players[0] == 'mppi') {
+      mppi_policies.push(0);
     }
+
+    // Check player 1
     if (players[1] == 'human') {
-        player_index = 1;
-        npc_policies = [0]; 
+      player_index.push(1);
+    } else if (players[1] == 'npc') {
+      npc_policies.push(1);
+    } else if (players[1] == 'mppi') {
+      mppi_policies.push(1);
     }
     
     let layout_name = $("#layout").val();
@@ -135,6 +157,7 @@ function startGame(endOfGameCallback) {
         start_grid: layout,
         layout_name: layout_name,
         npc_policies: npc_policies,
+        mppi_policies: ,
         algo: algo,
         mdp_params: mdp_params,
         task_params: PARAMS,

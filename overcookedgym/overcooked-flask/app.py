@@ -11,6 +11,7 @@ from flask import Flask, jsonify, request
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, OvercookedState, PlayerState, ObjectState
 from overcooked_ai_py.planning.planners import MediumLevelPlanner, NO_COUNTERS_PARAMS
 from stable_baselines3 import PPO
+from pantheonrl.common.vae_models import MPPI_agent
 
 from overcookedgym.overcooked_utils import NAME_TRANSLATION
 from pantheonrl.common.trajsaver import SimultaneousTransitions
@@ -87,10 +88,18 @@ def convert_traj_to_simultaneous_transitions(traj_dict, layout_name):
             flags,
         )
 
+LAST_RL_ACTION_STEPS_AGO = 0
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    global LAST_RL_ACTION_STEPS_AGO  # Declare as global to modify it
     if request.method == 'POST':
+        if LAST_RL_ACTION_STEPS_AGO < 4:
+            LAST_RL_ACTION_STEPS_AGO += 1
+            print("sending no RL action for delay")
+            return jsonify({'action': 4})  # send no-op action
+        LAST_RL_ACTION_STEPS_AGO = 0
+
         data_json = json.loads(request.data)
         state_dict, player_id_dict, server_layout_name, algo, timestep = data_json["state"], data_json[
             "npc_index"], data_json["layout_name"], data_json["algo"], data_json["timestep"]
@@ -125,6 +134,41 @@ def predict():
         print("sending action ", a)
         return jsonify({'action': a})
 
+LAST_MPPI_ACTION_STEPS_AGO = 0
+
+@app.route('/predict_mppi', methods=['POST'])
+def predict_mppi():
+    global LAST_MPPI_ACTION_STEPS_AGO  # Declare as global to modify it
+    if request.method == 'POST':
+        if LAST_MPPI_ACTION_STEPS_AGO < 2:
+            LAST_MPPI_ACTION_STEPS_AGO += 1
+            print("sending no MPPI action for delay")
+            return jsonify({'action': 4})  # send no-op action
+        LAST_MPPI_ACTION_STEPS_AGO = 0
+
+        data_json = json.loads(request.data)
+        state_dict, player_id_dict, server_layout_name, algo, timestep = data_json["state"], data_json[
+            "mppi_index"], data_json["layout_name"], data_json["algo"], data_json["timestep"]
+        player_id = int(player_id_dict)
+        layout_name = NAME_TRANSLATION[server_layout_name]
+        s0, s1 = process_state(state_dict, layout_name)
+
+        print("---\n")
+
+        if player_id == 0:
+            s, policy = s0, MPPI_POLICY
+        elif player_id == 1:
+            s, policy = s1, MPPI_POLICY
+        else:
+            assert(False)
+        
+        s = torch.tensor(s).unsqueeze(0).float()
+        actions, states = policy.predict(state_dict)
+        action = int(actions[0])
+
+        print(action)
+        print("sending MPPI action ", action)
+        return jsonify({'action': action})       
 
 @app.route('/updatemodel', methods=['POST'])
 def updatemodel():
@@ -190,6 +234,7 @@ if __name__ == '__main__':
             POLICY_P0 = PPO.load(ARGS.modelpath_p0)
         if ARGS.modelpath_p1:
             POLICY_P1 = PPO.load(ARGS.modelpath_p1)
+        MPPI_POLICY = MPPI_agent(N=20, T=20, H=20, layout_name=ARGS.layout_name)
 
     # TODO: client should pick layout name, instead of server?
     # currently both client/server pick layout name, and they must match

@@ -265952,27 +265952,26 @@ function startGame(endOfGameCallback) {
     console.log("Player One Strategy: " + strategyPlayerOne);
     console.log("File Name: " + saveFileName);
 
-    var player_index = [0, 1];
-    var npc_policies = [0, 1];
-    if (players[0] = 'human') {
-      if (players[1] == 'human') {
-        npc_policies = [];
-        player_index = [0, 1];
-      }
-      else {
-        npc_policies = [1];
-        player_index = [0];
-      }
+    var player_index = [];
+    var npc_policies = [];
+    var mppi_policies = [];
+
+    // Check player 0
+    if (players[0] == 'human') {
+      player_index.push(0);
+    } else if (players[0] == 'ai') {
+      npc_policies.push(0);
+    } else if (players[0] == 'mppi') {
+      mppi_policies.push(0);
     }
-    else {
-      if (players[1] == 'human') {
-        npc_policies = [0];
-        player_index = [1];
-      }
-      else {
-        npc_policies = [0, 1];
-        player_index = [];
-      }
+
+    // Check player 1
+    if (players[1] == 'human') {
+      player_index.push(1);
+    } else if (players[1] == 'ai') {
+      npc_policies.push(1);
+    } else if (players[1] == 'mppi') {
+      mppi_policies.push(1);
     }
 
     // if (players[0] == 'human' && players[1] == 'human') {
@@ -266012,6 +266011,7 @@ function startGame(endOfGameCallback) {
     game = new _overcookedSingle2.default({
         container_id: "overcooked",
         player_index: player_index,
+        mppi_policies: mppi_policies,
         start_grid: layout,
         layout_name: layout_name,
         npc_policies: npc_policies,
@@ -266258,6 +266258,7 @@ var OvercookedSinglePlayerTask = function () {
     function OvercookedSinglePlayerTask(_ref2) {
         var container_id = _ref2.container_id,
             player_index = _ref2.player_index,
+            mppi_policies = _ref2.mppi_policies,
             npc_policies = _ref2.npc_policies,
             mdp_params = _ref2.mdp_params,
             task_params = _ref2.task_params,
@@ -266308,6 +266309,7 @@ var OvercookedSinglePlayerTask = function () {
         }
         this.npc_policies = npc_policies;
         this.player_index = player_index;
+        this.mppi_policies = mppi_policies;
         this.algo = algo;
         this.strategy_player_zero = strategy_player_zero;
         this.strategy_player_one = strategy_player_one;
@@ -266327,13 +266329,13 @@ var OvercookedSinglePlayerTask = function () {
             player_colors: player_colors
         });
         this.init_orders = init_orders;
-        if (Object.keys(npc_policies).length == 1) {
-            console.log("Single human player vs agent");
-            this.game_type = 'human_vs_agent';
-        } else {
-            console.log("Agent playing vs agent");
-            this.game_type = 'agent_vs_agent';
-        }
+        // if (Object.keys(npc_policies).length == 1) {
+        //     console.log("Single human player vs agent");
+        //     this.game_type = 'human_vs_agent';
+        // } else {
+        //     console.log("Agent playing vs agent");
+        //     this.game_type = 'agent_vs_agent';
+        // }
 
         this.layout_name = layout_name;
         this.TIMESTEP = TIMESTEP;
@@ -266374,6 +266376,7 @@ var OvercookedSinglePlayerTask = function () {
 
             this.gameloop = setInterval(function () {
                 var _iteratorNormalCompletion = true;
+                var _iteratorNormalCompletion2 = true;
                 var _didIteratorError = false;
                 var _iteratorError = undefined;
 
@@ -266399,6 +266402,26 @@ var OvercookedSinglePlayerTask = function () {
 
                         // this.lstm_state[npc_index] = lstm_state;
                         _this.joint_action[npc_index] = npc_a;
+                    }
+                    // Handle MPPI policies
+                    for (var _iterator2 = _this.mppi_policies[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+                        var mppi_index = _step2.value;
+
+                        var xhr2 = new XMLHttpRequest();
+                        xhr2.open("POST", "/predict_mppi", false); // false for synchronous
+                        xhr2.setRequestHeader('Content-Type', 'application/json');
+                        xhr2.send(JSON.stringify({
+                            state: _this.state,
+                            mppi_index: mppi_index,
+                            layout_name: _this.layout_name,
+                            algo: 'mppi',
+                            timestep: _this.cur_gameloop
+                        }));
+                        var mppi_action_idx = JSON.parse(xhr2.responseText)["action"];
+                        var mppi_a = Action.INDEX_TO_ACTION[mppi_action_idx];
+                        console.log(mppi_a);
+
+                        _this.joint_action[mppi_index] = mppi_a;
                     }
                 } catch (err) {
                     _didIteratorError = true;
