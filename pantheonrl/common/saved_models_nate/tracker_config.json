@@ -1,0 +1,6 @@
+{
+    "input_dim": 16,
+    "latent_dim": 32,
+    "hidden_dim": 128,
+    "max_seq_len": 50
+}
