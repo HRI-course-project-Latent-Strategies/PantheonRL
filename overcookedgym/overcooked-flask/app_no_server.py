@@ -357,7 +357,7 @@ def run_simulation(args):
     p1_type = "human"
 
     num_episodes = args.num_episodes
-    if args.replay_player is not None and args.replay_dir is not None:
+    if args.use_human_p0 or args.use_human_p1:
         traj_files = glob.glob(os.path.join(args.replay_dir, "*.json"))
         if len(traj_files) == 0:
             print(f"Error: No JSON files found in {args.replay_dir}")
@@ -405,18 +405,19 @@ def run_simulation(args):
         print(f"Episode {episode_idx + 1}/{num_episodes}")
         print(f"{'='*70}")
 
-        if args.replay_player is not None and args.replay_dir is not None:
+        if args.use_human_p0 or args.use_human_p1:
             traj_file = traj_files[episode_idx]
             print(f"Replaying: {os.path.basename(traj_file)}")
             
-            recorded_agent = RecordedAgent(traj_file, args.replay_player)
-            
             # Assign recorded agent to correct player
-            if args.replay_player == 0:
-                agent_p0 = recorded_agent
+            if args.use_human_p0:
+                recorded_agent_p0 = RecordedAgent(traj_file, 0)
+                agent_p0 = recorded_agent_p0
                 p0_type = "recorded"
-            else:
-                agent_p1 = recorded_agent
+
+            if args.use_human_p1:
+                recorded_agent_p1 = RecordedAgent(traj_file, 1)
+                agent_p1 = recorded_agent_p1
                 p1_type = "recorded"
         
         # Run episode
@@ -481,9 +482,11 @@ if __name__ == '__main__':
     
     # Replay configuration
     parser.add_argument('--replay_dir', type=str, default=None,
-                        help="Directory containing recorded trajectories to replay")
-    parser.add_argument('--replay_player', type=int, choices=[0, 1], default=None,
-                        help="Which player to replay from recordings (0 or 1)")
+                        help="Directory containing recorded trajectories to replay for p0")
+    parser.add_argument('--use_human_p0', action='store_true',
+                        help="Use human data agent for player 0")
+    parser.add_argument('--use_human_p1', action='store_true',
+                        help="Use human data for player 1")
     parser.add_argument('--max_replays', type=int, default=None,
                         help="Maximum number of trajectories to replay (default: all)")
     
