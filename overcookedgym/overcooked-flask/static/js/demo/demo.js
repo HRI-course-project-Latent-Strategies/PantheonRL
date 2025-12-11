@@ -266371,6 +266371,7 @@ var OvercookedSinglePlayerTask = function () {
             this.state = this.game.mdp.get_start_state(this.init_orders);
             this.game.drawState(this.state);
             this.joint_action = [STAY, STAY];
+            this.last_joint_action = [STAY, STAY];
             // this.lstm_state = [null, null];
             this.done = 1;
 
@@ -266412,6 +266413,7 @@ var OvercookedSinglePlayerTask = function () {
                         xhr2.setRequestHeader('Content-Type', 'application/json');
                         xhr2.send(JSON.stringify({
                             state: _this.state,
+                            last_joint_action: _this.last_joint_action,
                             mppi_index: mppi_index,
                             layout_name: _this.layout_name,
                             algo: 'mppi',
@@ -266486,6 +266488,7 @@ var OvercookedSinglePlayerTask = function () {
 
                 //set up next timestep
                 _this.state = next_state;
+                _this.last_joint_action = _this.joint_action;
                 _this.joint_action = [STAY, STAY];
                 _this.cur_gameloop += 1;
                 _this.activate_response_listener();

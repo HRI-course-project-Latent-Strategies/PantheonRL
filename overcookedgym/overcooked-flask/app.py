@@ -17,7 +17,8 @@ from overcookedgym.overcooked_utils import NAME_TRANSLATION
 from pantheonrl.common.trajsaver import SimultaneousTransitions
 
 app = Flask(__name__)
-
+last_action_p0 = None
+last_action_p1 = None
 
 def get_prediction(s, policy, layout_name, algo):
     s = torch.tensor(s).unsqueeze(0).float()
@@ -94,7 +95,7 @@ LAST_RL_ACTION_STEPS_AGO = 0
 def predict():
     global LAST_RL_ACTION_STEPS_AGO  # Declare as global to modify it
     if request.method == 'POST':
-        if LAST_RL_ACTION_STEPS_AGO < 4:
+        if LAST_RL_ACTION_STEPS_AGO < 0:
             LAST_RL_ACTION_STEPS_AGO += 1
             print("sending no RL action for delay")
             return jsonify({'action': 4})  # send no-op action
@@ -107,8 +108,6 @@ def predict():
         layout_name = NAME_TRANSLATION[server_layout_name]
         s0, s1 = process_state(state_dict, layout_name)
 
-        # print(s0.to_dict())
-        # print(s1.to_dict())
         print("---\n")
 
         if ARGS.replay_traj:
@@ -147,8 +146,10 @@ def predict_mppi():
         LAST_MPPI_ACTION_STEPS_AGO = 0
 
         data_json = json.loads(request.data)
-        state_dict, player_id_dict, server_layout_name, algo, timestep = data_json["state"], data_json[
-            "mppi_index"], data_json["layout_name"], data_json["algo"], data_json["timestep"]
+        state_dict, player_id_dict, server_layout_name, algo, timestep, last_joint_action = data_json["state"], data_json[
+            "mppi_index"], data_json["layout_name"], data_json["algo"], data_json["timestep"], data_json['last_joint_action']
+
+        print('last_joint_action:', last_joint_action)
         player_id = int(player_id_dict)
         layout_name = NAME_TRANSLATION[server_layout_name]
         s0, s1 = process_state(state_dict, layout_name)
@@ -162,12 +163,47 @@ def predict_mppi():
         else:
             assert(False)
         
+        p0_last_action = last_joint_action[0]
+        p1_last_action = last_joint_action[1]
+
+        if p0_last_action == [0, 0]: # NO-OP
+            p0_last_action = 4
+        elif p0_last_action == [0, 1]: # DOWN
+            p0_last_action = 1
+        elif p0_last_action == [0, -1]: # UP
+            p0_last_action = 0 
+        elif p0_last_action == [1, 0]: # RIGHT
+            p0_last_action = 2 
+        elif p0_last_action == [-1, 0]: # LEFT
+            p0_last_action = 3 
+        elif p0_last_action == 'INTERACT': # INTERACT
+            p0_last_action = 5
+
+        if p1_last_action == [0, 0]: # NO-OP
+            p1_last_action = 4
+        elif p1_last_action == [0, 1]: # DOWN
+            p1_last_action = 1
+        elif p1_last_action == [0, -1]: # UP
+            p1_last_action = 0 
+        elif p1_last_action == [1, 0]: # RIGHT
+            p1_last_action = 2 
+        elif p1_last_action == [-1, 0]: # LEFT
+            p1_last_action = 3 
+        elif p1_last_action == 'INTERACT': # INTERACT
+            p1_last_action = 5
+
         s = torch.tensor(s).unsqueeze(0).float()
-        actions, states = policy.predict(state_dict)
-        action = int(actions[0])
+        action, mppi_agent_id = policy.predict(state_dict, last_p0_action=p0_last_action, last_p1_action=p1_last_action)
+        action = int(action)
 
         print(action)
         print("sending MPPI action ", action)
+        if mppi_agent_id == 0:
+            global last_action_p1
+            last_action_p1 = action
+        else:
+            global last_action_p0
+            last_action_p0 = action
         return jsonify({'action': action})       
 
 @app.route('/updatemodel', methods=['POST'])
@@ -177,7 +213,7 @@ def updatemodel():
         traj_dict, traj_id, server_layout_name, algo, p0_strat, p1_strat, file_name = data_json["traj"], data_json[
             "traj_id"], data_json["layout_name"], data_json["algo"], data_json['p0_strat'], data_json['p1_strat'], data_json['file_name']
         layout_name = NAME_TRANSLATION[server_layout_name]
-        print(traj_id)
+        print('traj_id:', traj_id)
 
         if ARGS.trajs_savepath:
             import time
@@ -191,6 +227,7 @@ def updatemodel():
             # Save transitions minimal (only state/action/done, no reward)
             simultaneous_transitions = convert_traj_to_simultaneous_transitions(
                 traj_dict, layout_name)
+            
             simultaneous_transitions.write_transition(filename)
 
         # Finetune model: todo
@@ -234,7 +271,7 @@ if __name__ == '__main__':
             POLICY_P0 = PPO.load(ARGS.modelpath_p0)
         if ARGS.modelpath_p1:
             POLICY_P1 = PPO.load(ARGS.modelpath_p1)
-        MPPI_POLICY = MPPI_agent(N=20, T=20, H=20, layout_name=ARGS.layout_name)
+        MPPI_POLICY = MPPI_agent(N=1, T=20, H=50, layout_name=ARGS.layout_name)
 
     # TODO: client should pick layout name, instead of server?
     # currently both client/server pick layout name, and they must match
