@@ -1,0 +1,8 @@
+{
+    "state_dim": 76,
+    "action_dim": 6,
+    "latent_dim": 32,
+    "hidden_dim": 256,
+    "num_past_actions_in_generator": 5,
+    "seq_len": 100
+}

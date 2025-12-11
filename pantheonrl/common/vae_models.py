@@ -92,24 +92,21 @@ class StrategyVAE(nn.Module):
         """
         state_h = initial_state # Shape: (Batch, 1, Input_Dim)
         preds = []
-        p0_actions = []
-        p1_actions = []
         
         # Initialize LSTM hidden state
         hidden = None 
         last_state = initial_state
-        z_input = z_joint.unsqueeze(1)
+        z_input = z_joint
         
+        N = z_joint.size(0)
+        p0_actions = torch.zeros((N, horizon, self.input_p0_act_dim)).to(initial_state.device)
+        p1_actions = torch.zeros((N, horizon, self.input_p1_act_dim)).to(initial_state.device)
         with torch.no_grad():
-            for _ in range(horizon):
+            for idx in range(horizon):
                 # Input: Concat current state and latent strategy
                 # z_joint needs to be reshaped to (Batch, 1, Latent*2)
                 
-                # print('last_state shape:', last_state.shape)
-                # print('past_actions_p0 shape:', past_actions_p0.shape)
-                # print('past_actions_p1 shape:', past_actions_p1.shape)
-                # print('z_input shape:', z_input.shape)
-                decoder_input = torch.cat([last_state, past_actions_p0.reshape(1, -1), past_actions_p1.reshape(1, -1), z_input.reshape(1, -1)], dim=1)
+                decoder_input = torch.cat([last_state, past_actions_p0, past_actions_p1, z_input], dim=1)
 
                 # Step LSTM
                 out, hidden = self.decoder_lstm(decoder_input, hidden)
@@ -125,8 +122,18 @@ class StrategyVAE(nn.Module):
                 recon_states[:, 0:4] = torch.round(recon_states[:, 0:4])    # P0 pos/orient only
                 recon_states[:, 8:12] = torch.round(recon_states[:, 8:12])  # P1 pos/orient only
 
-                recon_p0_actions = self.argmax(self.softmax(reconstruction[:, self.input_state_dim:self.input_state_dim + self.input_p0_act_dim]))
-                recon_p1_actions = self.argmax(self.softmax(reconstruction[:, self.input_state_dim + self.input_p0_act_dim:self.input_state_dim + self.input_p0_act_dim + self.input_p1_act_dim]))
+                # recon_p0_actions = self.argmax(self.softmax(reconstruction[:, self.input_state_dim:self.input_state_dim + self.input_p0_act_dim]))
+                # recon_p1_actions = self.argmax(self.softmax(reconstruction[:, self.input_state_dim + self.input_p0_act_dim:self.input_state_dim + self.input_p0_act_dim + self.input_p1_act_dim]))
+                wait_action_index = 4
+                p0_probs = self.softmax(reconstruction[:, self.input_state_dim:self.input_state_dim + self.input_p0_act_dim])
+                p0_probs[:, wait_action_index] *= 0.3  # Make wait less likely
+                p0_probs = p0_probs / p0_probs.sum(dim=-1, keepdim=True)
+                recon_p0_actions = self.argmax(p0_probs)
+
+                p1_probs = self.softmax(reconstruction[:, self.input_state_dim + self.input_p0_act_dim:self.input_state_dim + self.input_p0_act_dim + self.input_p1_act_dim])
+                p1_probs[:, wait_action_index] *= 0.3  # Make wait less likely
+                p1_probs = p1_probs / p1_probs.sum(dim=-1, keepdim=True)
+                recon_p1_actions = self.argmax(p1_probs)
                 
                 reconstruction = torch.cat([recon_states, recon_p0_actions, recon_p1_actions], dim=1)
                 preds.append(reconstruction)
@@ -135,10 +142,12 @@ class StrategyVAE(nn.Module):
                 past_actions_p0 = torch.cat([past_actions_p0[:, 6:], recon_p0_actions], dim=1)
                 past_actions_p1 = torch.cat([past_actions_p1[:, 6:], recon_p1_actions], dim=1)
 
-                p0_actions.append(recon_p0_actions.cpu().numpy())
-                p1_actions.append(recon_p1_actions.cpu().numpy())
+                p0_actions[:, idx, :] = recon_p0_actions
+                p1_actions[:, idx, :] = recon_p1_actions
             
-        return np.array(p0_actions).reshape(-1, self.input_p0_act_dim), np.array(p1_actions).reshape(-1, self.input_p1_act_dim).reshape(-1, self.input_p1_act_dim)
+        p0_actions = torch.argmax(p0_actions, axis=2)
+        p1_actions = torch.argmax(p1_actions, axis=2)
+        return p0_actions.cpu().numpy(), p1_actions.cpu().numpy()
 
 class BeliefTracker(nn.Module):
     def __init__(self, input_dim, latent_dim, hidden_dim):
@@ -153,6 +162,18 @@ class BeliefTracker(nn.Module):
         h = h[-1]
         return self.fc_mu(h), self.fc_logvar(h)
 
+class ScoringModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 1)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        h = self.relu(self.fc1(x))
+        score = self.fc2(h)
+        return score
+
 from typing import Optional
 from collections import deque
 import numpy as np
@@ -163,25 +184,27 @@ from overcooked_ai_py.mdp.actions import Action, Direction
 from overcooked_ai_py.mdp.overcooked_mdp import OvercookedGridworld, OvercookedState, PlayerState, ObjectState
 
 class MPPI_agent(Agent):
-    def __init__(self, N, T, H, layout_name="cramped_room"):
-        self.agent_id = 1  # Follower # TODO: Make MPPI work as either agent!
+    def __init__(self, N, H, agent_id=1, layout_name="cramped_room"):
+        self.agent_id = agent_id  # Follower # TODO: Make MPPI work as either agent!
         self.p0_idx = 0
         self.p1_idx = 1
         self.N = N        # number of trajectories
-        self.T = T        # time steps of history
         self.H = H        # horizon length
         self.lambda_ = 1.0  # temperature parameter
-        self.history_state = deque(maxlen=T)
         self.layout_name = layout_name
-        self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # FIX: Make it self.DEVICE
+        # self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.DEVICE = torch.device("cuda")
+        print("Using device:", self.DEVICE)
         
 
-        self.vae_dir = "pantheonrl/common/test_models/"
+        self.vae_dir = "PantheonRL/pantheonrl/common/saved_models_with_scoring/"
 
         with open(os.path.join(self.vae_dir, "vae_config.json"), 'r') as f:
             vae_conf = json.load(f)
         with open(os.path.join(self.vae_dir, "tracker_config.json"), 'r') as f:
             tracker_conf = json.load(f)
+        with open(os.path.join(self.vae_dir, "scoring_model_config.json"), 'r') as f:
+            scoring_model_conf = json.load(f)
         with open(os.path.join(self.vae_dir, "strategy_map.json"), 'r') as f:
             strategy_map = json.load(f)
 
@@ -211,9 +234,16 @@ class MPPI_agent(Agent):
         self.tracker.load_state_dict(torch.load(self.vae_dir + "belief_tracker.pth", map_location=self.DEVICE))
         self.tracker.eval()
 
-    def step(self, state_dict, trajectories, return_mode="weighted"):
+        self.scoring_model = ScoringModel(
+            input_dim=scoring_model_conf['input_dim'],
+            hidden_dim=scoring_model_conf['hidden_dim']
+        ).to(self.DEVICE)
 
-        optimal_traj, reward = self.trajectory_reward(trajectories, state_dict)
+    def step(self, state_dict, trajectories, z_joint_batched, return_mode="weighted"):
+
+        optimal_traj, reward, optimal_traj_idx = self.trajectory_reward(trajectories, z_joint_batched, state_dict)
+        # print("Optimal Trajectory Reward:", reward)
+        # print("Optimal Trajectory Index:", optimal_traj_idx)
         return optimal_traj
 
     def intitialize_MDP(self, state_dict):
@@ -264,68 +294,29 @@ class MPPI_agent(Agent):
         state = OvercookedState.from_dict(state_dict)
         return MDP, state
         
-    def trajectory_reward(self, trajectories, state_dict):
-        # MDP = OvercookedGridworld.from_layout_name(layout_name=self.layout_name)
-        # print(state)
-        # for player in state['players']:
-        #     if 'held_object' not in player:
-        #         player['held_object'] = None
-        # if 'objects' in state:
-        #     if isinstance(state['objects'], dict):
-        #         # Web interface format: {'2,1': {'name': 'dish', 'position': [2, 1]}}
-        #         # Convert to list: [{'name': 'dish', 'position': (2, 1), 'state': None}]
-        #         object_list = []
-        #         for pos_key, obj in state['objects'].items():
-        #             normalized_obj = obj.copy() if isinstance(obj, dict) else obj
-                    
-        #             # Ensure position is a tuple
-        #             if isinstance(normalized_obj.get('position'), list):
-        #                 normalized_obj['position'] = tuple(normalized_obj['position'])
-                    
-        #             # Ensure state field exists
-        #             if 'state' not in normalized_obj:
-        #                 normalized_obj['state'] = None
-                        
-        #             object_list.append(normalized_obj)
-                
-        #         state['objects'] = object_list
-        #     elif isinstance(state['objects'], list):
-        #         # Already a list, just normalize each object
-        #         normalized_objects = []
-        #         for obj in state['objects']:
-        #             normalized_obj = obj.copy() if isinstance(obj, dict) else obj
-                    
-        #             # Ensure position is a tuple
-        #             if isinstance(normalized_obj.get('position'), list):
-        #                 normalized_obj['position'] = tuple(normalized_obj['position'])
-                    
-        #             # Ensure state field exists
-        #             if 'state' not in normalized_obj:
-        #                 normalized_obj['state'] = None
-                        
-        #             normalized_objects.append(normalized_obj)
-                
-        #         state['objects'] = normalized_objects
-        # else:
-        #     state['objects'] = []
-        # print(state)
-        # state = OvercookedState.from_dict(state)
-        
+    def trajectory_reward(self, trajectories, latent_states, state_dict):   
+        with torch.no_grad():
+            strategy_compatibility_reward_batch = self.scoring_model(latent_states).cpu().numpy()
         optimal_traj = []
-        optimal_traj_reward = float('-inf')
-        for trajectory in trajectories:
+        optimal_traj_idx = -1
+        optimal_reward = float('-inf')
+        for idx, trajectory in enumerate(trajectories):
             MDP, state = self.intitialize_MDP(state_dict)
             traj_actions = trajectory
             traj_total_reward = 0
+            strategy_compatibility_reward = strategy_compatibility_reward_batch[idx]
             for action in traj_actions:
                 joint_action = (Action.ALL_ACTIONS[action[0]], Action.ALL_ACTIONS[action[1]])
                 next_state, reward, _ = MDP.get_state_transition(state, joint_action)
                 state = next_state
                 traj_total_reward += reward
-            if traj_total_reward > optimal_traj_reward:
-                optimal_traj_reward = traj_total_reward
+            total_reward = traj_total_reward + (strategy_compatibility_reward*0.05)
+            # total_reward = traj_total_reward
+            if total_reward > optimal_reward:
+                optimal_reward = total_reward
                 optimal_traj = traj_actions
-        return optimal_traj, optimal_traj_reward
+                optimal_traj_idx = idx
+        return optimal_traj, optimal_reward, optimal_traj_idx
         
     def state_dict_to_vae_state(self, state_dict):
         players = state_dict['players']
@@ -395,8 +386,6 @@ class MPPI_agent(Agent):
         # Convert observation to tensor if needed
         if not isinstance(state, torch.Tensor):
             state = torch.tensor(state, dtype=torch.float32).to(self.DEVICE)
-        
-        self.history_state.append(state)
 
         last_state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.DEVICE)  # Shape: (1, T, STATE_DIM)
         last_action_p0_tensor = torch.tensor(last_p0_act_vec, dtype=torch.float32).unsqueeze(0).to(self.DEVICE)
@@ -405,47 +394,39 @@ class MPPI_agent(Agent):
         with torch.no_grad():
             # use history_tensor instead of self.history
             mu, logvar = self.tracker(torch.cat([last_state_tensor, last_action_p0_tensor, last_action_p1_tensor], dim=1))
-            std = torch.exp(0.5 * logvar)
-            
-            # Sample Human Intent
-            # z_joint = torch.distributions.Normal(mu, std).sample((self.N,)).squeeze(1)
-            z_joint = torch.distributions.Normal(mu, std).sample()        
+            # std = torch.exp(0.5 * logvar)
+            # z_joint_batched = torch.distributions.Normal(mu, std).sample((self.N,)).squeeze(1).to(self.DEVICE)
 
-            # Sample Agent Intent
-            # z_a = torch.randn(self.N, self.vae.latent_dim).to(self.DEVICE)
-            # z_a = z_h.clone()
-            
-            # Combine into Joint Strategy
-            # z_joint = torch.cat([z_h, z_a], dim=1)
-            
-            # Generate state trajectories
-            p0_action_history_tensor = torch.tensor(self.p0_action_history, dtype=torch.float32).unsqueeze(0).to(self.DEVICE)
-            p1_action_history_tensor = torch.tensor(self.p1_action_history, dtype=torch.float32).unsqueeze(0).to(self.DEVICE)
+            mu_p0 = mu[:mu.size(0)//2]
+            mu_p1 = mu[mu.size(0)//2:]
+            logvar_p0 = logvar[:logvar.size(0)//2]
+            logvar_p1 = logvar[logvar.size(0)//2:]
+            std_p0 = torch.exp(0.5 * logvar_p0)
+            std_p1 = torch.exp(0.5 * logvar_p1)
 
-            action_trajectories_p0 = []
-            action_trajectories_p1 = []
-            for _idx in range(self.N):
-                p0_action, p1_action = self.vae.generate(initial_state=last_state_tensor, z_joint=z_joint, past_actions_p0=p0_action_history_tensor, past_actions_p1=p1_action_history_tensor, horizon=self.H)
-                action_trajectories_p0.append(np.argmax(p0_action, axis=1))
-                action_trajectories_p1.append(np.argmax(p1_action, axis=1))
+            if self.agent_id == 0:
+                z_p0 = torch.distributions.Normal(mu_p0, std_p0*5).sample((self.N,)).to(self.DEVICE)
+                z_p1 = mu_p1.repeat(self.N, 1).to(self.DEVICE)
+            else:
+                z_p0 = mu_p0.repeat(self.N, 1).to(self.DEVICE)
+                z_p1 = torch.distributions.Normal(mu_p1, std_p1*5).sample((self.N,)).to(self.DEVICE)
             
-            action_trajectories = []
-            for traj_idx in range(self.N):
-                actions = []
-                for t in range(self.H - 1):  # H-1 because we need pairs of states
-                    action_p0 = action_trajectories_p0[traj_idx][t]
-                    action_p1 = action_trajectories_p1[traj_idx][t]
-                    actions.append([action_p0, action_p1])
-                # Add final action (or repeat last action)
-                # actions.append(actions[-1] if actions else 4)  # Default to STAY if empty
-                action_trajectories.append(actions)
+            z_joint_batched = torch.cat([z_p0, z_p1], dim=1).squeeze(1).to(self.DEVICE)
             
-            action_trajectories = np.array(action_trajectories)
-            # action_trajectories = np.array([traj[traj != 4] for traj in action_trajectories], dtype=object)
+            p0_action_history_tensor_batched = torch.tensor(self.p0_action_history, dtype=torch.float32).unsqueeze(0).repeat(self.N, 1).to(self.DEVICE)
+            p1_action_history_tensor_batched = torch.tensor(self.p1_action_history, dtype=torch.float32).unsqueeze(0).repeat(self.N, 1).to(self.DEVICE)
+            last_state_tensor_batched = last_state_tensor.repeat(self.N, 1).to(self.DEVICE)
+
+            p0_action_batched, p1_action_batched = self.vae.generate(initial_state=last_state_tensor_batched, z_joint=z_joint_batched, past_actions_p0=p0_action_history_tensor_batched, past_actions_p1=p1_action_history_tensor_batched, horizon=self.H)
+            action_trajectories_p0 = p0_action_batched
+            action_trajectories_p1 = p1_action_batched
+            action_trajectories = np.zeros((self.N, self.H, 2), dtype=int)
+            action_trajectories[:, :, 0] = action_trajectories_p0
+            action_trajectories[:, :, 1] = action_trajectories_p1
 
         # Find best trajectory using actual MDP rollouts
-        best_traj = self.step(state_dict, action_trajectories, return_mode="best")[:, self.agent_id].flatten()
-        print("best traj: ", best_traj)
+        best_traj = self.step(state_dict, action_trajectories, z_joint_batched, return_mode="best")[:, self.agent_id].flatten()
+
         # Get first action that is not 4 (STAY)
         first_action = None
         for action in best_traj:

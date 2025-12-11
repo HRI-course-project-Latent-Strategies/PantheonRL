@@ -139,17 +139,16 @@ LAST_MPPI_ACTION_STEPS_AGO = 0
 def predict_mppi():
     global LAST_MPPI_ACTION_STEPS_AGO  # Declare as global to modify it
     if request.method == 'POST':
-        if LAST_MPPI_ACTION_STEPS_AGO < 2:
-            LAST_MPPI_ACTION_STEPS_AGO += 1
-            print("sending no MPPI action for delay")
-            return jsonify({'action': 4})  # send no-op action
-        LAST_MPPI_ACTION_STEPS_AGO = 0
+        # if LAST_MPPI_ACTION_STEPS_AGO < 2:
+        #     LAST_MPPI_ACTION_STEPS_AGO += 1
+        #     print("sending no MPPI action for delay")
+        #     return jsonify({'action': 4})  # send no-op action
+        # LAST_MPPI_ACTION_STEPS_AGO = 0
 
         data_json = json.loads(request.data)
         state_dict, player_id_dict, server_layout_name, algo, timestep, last_joint_action = data_json["state"], data_json[
             "mppi_index"], data_json["layout_name"], data_json["algo"], data_json["timestep"], data_json['last_joint_action']
 
-        print('last_joint_action:', last_joint_action)
         player_id = int(player_id_dict)
         layout_name = NAME_TRANSLATION[server_layout_name]
         s0, s1 = process_state(state_dict, layout_name)
@@ -196,8 +195,6 @@ def predict_mppi():
         action, mppi_agent_id = policy.predict(state_dict, last_p0_action=p0_last_action, last_p1_action=p1_last_action)
         action = int(action)
 
-        print(action)
-        print("sending MPPI action ", action)
         if mppi_agent_id == 0:
             global last_action_p1
             last_action_p1 = action
@@ -229,8 +226,6 @@ def updatemodel():
                 traj_dict, layout_name)
             
             simultaneous_transitions.write_transition(filename)
-
-        # Finetune model: todo
 
         REPLAY_TRAJ_IDX = 0
         done = True
@@ -271,7 +266,7 @@ if __name__ == '__main__':
             POLICY_P0 = PPO.load(ARGS.modelpath_p0)
         if ARGS.modelpath_p1:
             POLICY_P1 = PPO.load(ARGS.modelpath_p1)
-        MPPI_POLICY = MPPI_agent(N=1, T=20, H=50, layout_name=ARGS.layout_name)
+        MPPI_POLICY = MPPI_agent(N=60, H=20, agent_id=1, layout_name=ARGS.layout_name)
 
     # TODO: client should pick layout name, instead of server?
     # currently both client/server pick layout name, and they must match

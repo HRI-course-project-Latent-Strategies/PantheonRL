@@ -1,0 +1,11 @@
+{
+    "plate_only+plate_only": 0,
+    "onion_only+plate_only": 1,
+    "plate_and_onion+plate_and_onion": 2,
+    "plate_only+plate_and_onion": 3,
+    "onion_only+onion_only": 4,
+    "onion_only+plate_and_onion": 5,
+    "plate_only+onion_only": 6,
+    "plate_and_onion+plate_only": 7,
+    "plate_and_onion+onion_only": 8
+}

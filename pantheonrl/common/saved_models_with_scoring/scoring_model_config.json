@@ -1,0 +1,4 @@
+{
+    "input_dim": 64,
+    "hidden_dim": 256
+}
